@@ -73,6 +73,15 @@ class _SerialTransport:
             timeout=timeout,
         )
 
+    @property
+    def timeout(self) -> float:
+        """Per-read timeout in seconds of the open serial port."""
+        return self._ser.timeout
+
+    @timeout.setter
+    def timeout(self, value: float) -> None:
+        self._ser.timeout = value
+
     def send(self, cmd: str) -> None:
         """Send an ASCII command string terminated with CR.
 
@@ -232,6 +241,15 @@ class _TCPTransport:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.settimeout(timeout)
         self._sock.connect((host, port))
+
+    @property
+    def timeout(self) -> float:
+        """Socket-level timeout in seconds of the connected socket."""
+        return self._sock.gettimeout()
+
+    @timeout.setter
+    def timeout(self, value: float) -> None:
+        self._sock.settimeout(value)
 
     def send(self, cmd: str) -> None:
         """Send an ASCII command string terminated with CR.
@@ -525,6 +543,26 @@ class Specbos1211:
     def __exit__(self, *_) -> None:
         """Exit the context manager: close the transport unconditionally."""
         self.disconnect()
+
+    @property
+    def timeout(self) -> float:
+        """Per-read timeout in seconds, applied to the live connection.
+
+        Can be changed at any time without reconnecting, e.g. shortened for
+        quick queries or lengthened before a long integration. Like the
+        ``timeout`` argument of ``from_serial()`` / ``from_tcp()``, it bounds
+        each individual read, not a whole operation.
+
+        Raises:
+            JetiError: On assignment, if the value is not > 0.
+        """
+        return self._transport.timeout
+
+    @timeout.setter
+    def timeout(self, value: float) -> None:
+        if not value > 0:
+            raise JetiError(f'timeout={value} must be > 0')
+        self._transport.timeout = value
 
     @property
     def wavelengths(self) -> np.ndarray | None:

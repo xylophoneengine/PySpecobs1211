@@ -8,7 +8,7 @@ The JETI SDK ships Windows-only DLLs (`jeti_core.dll`, `jeti_radio_ex.dll`).
 This driver bypasses it entirely and speaks the device's own SCPI-compatible
 text protocol directly over the serial port or a TCP socket.
 
-VIBECODE ALERT. But it was tested with a Jeti specobs 1211-LAN :)
+VIBECODE ALERT. But it was tested with a Jeti specbos 1211-LAN :)
 
 ---
 
@@ -142,6 +142,13 @@ dev.disconnect()  # close the serial port or socket
 ```
 
 Called automatically by the context manager (`__enter__` / `__exit__`).
+
+#### Timeout
+
+```python
+dev.timeout         # -> float, current per-read timeout in seconds
+dev.timeout = 5.0   # change it on the live connection; must be > 0 (else JetiError)
+```
 
 #### Configuration
 
@@ -294,7 +301,8 @@ The default `timeout=60.0` s applies to every individual read call, not
 the whole measurement. In auto-expose mode the device may take several
 times `max_tint` milliseconds for trial integrations before the final
 measurement. Increase `timeout` for very dark targets or long integration
-times.
+times. It can also be changed on a live connection via `dev.timeout = ...`,
+without reconnecting.
 
 **`JetiError: device NAK: 21 : error config argument`**
 
