@@ -1,0 +1,18 @@
+# python bytecode / tool caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# macOS
+.DS_Store
+._*
+
+# editor / agent state
+.claude/
+.serena/
+.vscode/
+.idea/
