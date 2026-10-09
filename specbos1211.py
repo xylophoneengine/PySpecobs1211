@@ -24,6 +24,7 @@ from typing import Literal
 import numpy as np
 import serial
 import serial.tools.list_ports as list_ports
+from serial.tools.list_ports_common import ListPortInfo
 
 
 class JetiError(Exception):
@@ -368,12 +369,29 @@ class _TCPTransport:
         self._sock.close()
 
 
+def find_serial_ports() -> list[ListPortInfo]:
+    """List the serial ports that look like a specbos 1211.
+
+    Matches FTDI devices with VID=0x0403 and PID=0x6001, which is the
+    USB-serial adapter embedded in the specbos 1211 hardware.
+
+    Returns:
+        One ``ListPortInfo`` per attached device (``.device`` is the port
+        path, ``.serial_number`` the FTDI serial); empty if none is attached.
+    """
+    FTDI_VID = 0x0403
+    FTDI_PID = 0x6001
+    ports: dict[str, ListPortInfo] = {}
+    for p in list_ports.comports():
+        if p.vid == FTDI_VID and p.pid == FTDI_PID:
+            # Apple's AppleUSBFTDI and FTDI's own VCP driver can both publish
+            # a port for the same chip; keep one per FTDI serial number.
+            ports.setdefault(p.serial_number or p.device, p)
+    return list(ports.values())
+
+
 def _find_serial_port() -> str:
     """Auto-detect the specbos 1211 USB serial port by FTDI VID/PID.
-
-    Scans all available serial ports for an FTDI device with VID=0x0403 and
-    PID=0x6001, which is the USB-serial adapter embedded in the specbos 1211
-    hardware.
 
     Returns:
         The OS device path of the matched port, e.g.
@@ -383,12 +401,7 @@ def _find_serial_port() -> str:
         JetiError: If no FTDI device is found, or if more than one is found
             (ambiguous; caller must pass ``port=`` explicitly).
     """
-    FTDI_VID = 0x0403
-    FTDI_PID = 0x6001
-    candidates = [
-        p.device for p in list_ports.comports()
-        if p.vid == FTDI_VID and p.pid == FTDI_PID
-    ]
+    candidates = [p.device for p in find_serial_ports()]
     if len(candidates) == 0:
         raise JetiError('no specbos 1211 found (no FTDI device at VID=0x0403/PID=0x6001)')
     if len(candidates) > 1:

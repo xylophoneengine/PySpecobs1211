@@ -20,6 +20,9 @@ VIBECODE ALERT. But it was tested with a Jeti specbos 1211-LAN :)
 
 No other dependencies. The entire driver is a single file: `specbos1211.py`.
 
+The optional GUI (`specbos1211_gui.py`) additionally needs matplotlib,
+colour-science and scipy; Tk comes with Python.
+
 ---
 
 ## Installation
@@ -92,6 +95,45 @@ with Specbos1211.from_serial() as dev:
     spd = dev.measure('sprad')  # shape (401,) in W sr^-1 m^-2 nm^-1
     print(f"peak: {spd.max():.3e} W sr^-1 m^-2 nm^-1 @ {wl[spd.argmax()]:.0f} nm")
 ```
+
+---
+
+## GUI
+
+![specbos1211 GUI: measured spectrum, luminance, radiance and CIE 1976 u'v' diagram](docs/gui.png)
+
+`python specbos1211_gui.py` (or `python -m specbos1211_gui`) is a minimal
+spectral viewer for getting a measurement without writing code:
+
+```bash
+pip install matplotlib colour-science scipy   # extra deps for the GUI
+python specbos1211_gui.py
+```
+
+1. **Device:** leave *Auto (USB serial)*, pick a listed port (Rescan
+   refreshes the list), or type the IP of a LAN variant (`host[:port]`,
+   port defaults to 2101). Pick **Demo** to try the viewer without hardware.
+   Click **Connect**. Serial ports are tried at 921600, 115200 and 38400
+   baud, so a unit not set to the factory default still connects.
+2. **Integration time:** *Auto* or a fixed time (1 ms to 30 s).
+3. Click **Measure**. The plot shows the spectral radiance (380-780 nm,
+   1 nm), next to it the luminance (cd/m²), radiance (W sr⁻¹ m⁻²), the CIE
+   1976 colour (Y, u′, v′) and its position (×) in the u′v′ diagram. Clear
+   resets plot and values.
+
+The **File writer** tab appends every measurement to a CSV file (one row per
+measurement: timestamp, integration time, luminance, radiance, Y/u′/v′, then
+one column per wavelength). The colour math is done with [colour-science]
+from the measured spectrum, not by the device. With the irradiance head
+fitted the values are irradiance (W m⁻² nm⁻¹), so the cards read lx and
+W/m² instead.
+
+The measurement runs in a worker thread, so the window stays responsive
+while auto exposure works on a dim target (that can take minutes). If a
+measurement fails, the GUI disconnects; connect again to resync. Connecting
+blocks the window for up to a few seconds if nothing answers.
+
+[colour-science]: https://github.com/colour-science/colour
 
 ---
 
@@ -201,6 +243,11 @@ dev.firmware_version() -> str   # queries *VERS?, returns e.g. 'V3.01'
 dev.reset() -> None             # sends *RST, waits 500 ms for reboot
 ```
 
+```python
+from specbos1211 import find_serial_ports
+find_serial_ports() -> list[ListPortInfo]   # attached FTDI 0403:6001 ports (.device, .serial_number)
+```
+
 ---
 
 ## Examples
@@ -290,6 +337,19 @@ raises `JetiError`, check the connection and pass the port explicitly:
 Specbos1211.from_serial('/dev/cu.usbserial-XXXXXXXX')
 ```
 
+**Timeout on connect (`timeout reading line`)**
+
+The unit may not be set to the 921600 baud default (one tested unit runs at
+115200). Pass the rate explicitly, e.g. `Specbos1211.from_serial(baud=115200)`;
+the GUI tries all three rates itself.
+
+**Two ports for one device**
+
+With FTDI's own VCP driver installed next to Apple's `AppleUSBFTDI`, macOS
+publishes two ports for the same chip (e.g. `/dev/cu.usbserial-A600PJ5Z`
+and `/dev/cu.usbserial-4`). Both work; `find_serial_ports()` and the
+auto-detect keep one per FTDI serial number.
+
 **Multiple FTDI devices found**
 
 If more than one FTDI device is connected, auto-detect is ambiguous. Pass
@@ -320,10 +380,19 @@ The device responded to `*IDN?` but the response did not contain `JETI` or
 ## Limitations
 
 - macOS only (tested on Apple Silicon). Linux likely works; Windows untested.
-- No colorimetric output (CCT, CRI, xy, uv, dominant wavelength). Use the
-  JETI SDK on Windows for those.
+- No colorimetric output from the driver (CCT, CRI, xy, uv, dominant
+  wavelength). The GUI computes luminance and u′v′ from the spectrum with
+  colour-science; for more use colour-science yourself or the JETI SDK.
 - Blocking API only. Not suitable for async or GUI event loops without running
-  measurements in a thread.
+  measurements in a thread (the GUI does exactly that).
+
+---
+
+## Development
+
+```bash
+python -m unittest -v test_specbos1211_gui   # no hardware needed
+```
 
 ---
 
