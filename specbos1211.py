@@ -45,7 +45,10 @@ class _SerialTransport:
     Device framing conventions:
         - Commands are ASCII strings terminated with CR (0x0D, ``\\r``).
         - ACK byte: 0x06.  NAK byte: 0x15.  BELL byte: 0x07.
-        - Spectral data blocks end with ``\\r\\r``; scalar responses with ``\\r``.
+        - FORM 4 spectral blocks (``*MEAS:SPRAD``) end with ``\\r\\r``; scalar
+          responses with ``\\r``.
+        - FORM 9 raw (``*MEAS`` with ``*CONF:FUNC 3``) has NO ``\\r\\r``: just
+          one ``\\r``-terminated float per wavelength point.
     """
 
     def __init__(self, port: str, baud: int, timeout: float) -> None:
@@ -731,10 +734,14 @@ class Specbos1211:
           ``wavelengths`` for the corresponding nm axis.
           Command: ``*MEAS:SPRAD``.
 
-        - **``'raw'``** -- Raw ADC counts (dimensionless detector signal).
-          Temporarily switches the output format to 9 (raw), measures, then
-          restores format 4. Same shape as ``'sprad'``.
-          Command: ``*MEAS`` with ``*CONF:FORM 9``.
+        - **``'raw'``** -- Light minus dark raw counts (dimensionless, may be
+          negative). Selects measurement function 3 (a bare ``*MEAS`` returns
+          whatever ``*CONF:FUNC`` is set; the power-on default 12 is a text
+          summary), switches the output format to 9, measures, then restores
+          format 4. FORM 9 sends one ``\\r``-terminated float per point with no
+          ``\\r\\r`` terminator, so exactly ``len(wavelengths)`` lines are read.
+          Requires ``configure()`` first. Same shape as ``'sprad'``.
+          Command: ``*MEAS`` with ``*CONF:FUNC 3`` and ``*CONF:FORM 9``.
 
         - **``'radio'``** -- Integrated radiometric total in W sr^-1 m^-2
           (a scalar). Returns a 0-D float64 array.
@@ -776,15 +783,23 @@ class Specbos1211:
             return result
 
         elif quantity == 'raw':
+            wavelengths = self.wavelengths
+            if wavelengths is None:
+                raise JetiError("measure('raw') needs configure() first for the point count")
+            # FUNC 3 = light minus dark raw counts. No restore needed: *MEAS:SPRAD
+            # is explicit and ignores FUNC.
+            self._transport.send('*CONF:FUNC 3')
+            self._transport.read_ack()
             self._transport.send('*CONF:FORM 9')
             self._transport.read_ack()
             try:
                 self._transport.send('*MEAS')
                 self._transport.read_ack()
                 self._transport.read_until_bell()
-                result = self._parse_floats(self._transport.read_lines())
-                if result.size == 0:
-                    result = self._parse_floats(self._transport.read_lines())
+                # FORM 9: one \r-terminated float per point, no \r\r terminator.
+                result = np.array(
+                    [float(self._transport.read_line()) for _ in range(wavelengths.size)]
+                )
             finally:
                 # Always restore format 4 so subsequent sprad calls work correctly.
                 self._transport.send('*CONF:FORM 4')
