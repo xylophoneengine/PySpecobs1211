@@ -16,6 +16,8 @@ Typical usage::
 
 from __future__ import annotations
 
+import logging
+import re
 import select
 import socket
 import time
@@ -25,6 +27,8 @@ import numpy as np
 import serial
 import serial.tools.list_ports as list_ports
 from serial.tools.list_ports_common import ListPortInfo
+
+_log = logging.getLogger(__name__)
 
 
 class JetiError(Exception):
@@ -76,6 +80,7 @@ class _SerialTransport:
             dsrdtr=False,
             timeout=timeout,
         )
+        self._last_cmd: str = ''
 
     @property
     def timeout(self) -> float:
@@ -92,12 +97,21 @@ class _SerialTransport:
         The firmware requires CR (0x0D) as the command terminator; CRLF is
         not accepted and will cause a NAK.
 
+        Any bytes already waiting in the receive buffer are stray (unsolicited
+        events, leftovers of an earlier reply) and would be mistaken for the
+        reply to ``cmd``; they are logged as a warning and discarded.
+
         Args:
             cmd: Command string without any terminator, e.g. ``'*IDN?'``.
 
         Raises:
             serial.SerialException: If the write fails at the OS level.
         """
+        waiting: int = self._ser.in_waiting
+        if waiting:
+            stray: bytes = self._ser.read(waiting)
+            _log.warning('discarding stray bytes %r before %r', stray, cmd)
+        self._last_cmd = cmd
         self._ser.write((cmd + '\r').encode('ascii'))
 
     def _read_byte(self) -> int:
@@ -119,20 +133,28 @@ class _SerialTransport:
 
         Expects 0x06 (ACK). On 0x15 (NAK), automatically queries the
         human-readable error string from ``*STAT:TXTERR?`` before raising.
+        ENQ bytes (0x05, unsolicited event code) are skipped.
 
         Raises:
             JetiError: If the device returns NAK (includes device error text),
                 if no byte arrives within the timeout, or if an unexpected
-                byte is received.
+                byte is received (message names the command and all pending
+                bytes).
         """
         b = self._read_byte()
+        while b == 0x05:
+            b = self._read_byte()
         if b == 0x06:
             return
         if b == 0x15:
             self.send('*STAT:TXTERR?')
             msg = self.read_line()
             raise JetiError(f'device NAK: {msg}')
-        raise JetiError(f'unexpected response byte: 0x{b:02x}')
+        pending: bytes = bytes([b]) + self._ser.read(self._ser.in_waiting)
+        raise JetiError(
+            f'unexpected response byte 0x{b:02x} to {self._last_cmd!r}; '
+            f'pending: {pending!r}'
+        )
 
     def read_until_bell(self) -> None:
         """Block until the device sends a BELL byte (0x07).
@@ -834,6 +856,36 @@ class Specbos1211:
         if self._transport.data_waiting(0.05):
             return f'{line1} / {self._transport.read_line()}'
         return line1
+
+    def last_tint_ms(self) -> float | None:
+        """Query the integration time the device last actually used.
+
+        Sends ``*CONF:TINT?``. Per the firmware manual the reply contains
+        ``Previous tint: <ms>`` (last time used, e.g. chosen by
+        auto-exposure) and ``Configured tint: <ms>``. The exact reply format
+        on firmware 3.0.2 is unverified, so all lines arriving within a short
+        timeout are collected and searched tolerantly.
+
+        Returns:
+            The number after "Previous tint" in milliseconds, or ``None`` if
+            the reply is missing or cannot be parsed.
+        """
+        self._transport.send('*CONF:TINT?')
+        old: float = self._transport.timeout
+        self._transport.timeout = min(old, 1.0)
+        lines: list[str] = []
+        try:
+            lines.append(self._transport.read_line())
+            while self._transport.data_waiting(0.05):
+                lines.append(self._transport.read_line())
+        except (JetiError, UnicodeDecodeError):
+            pass  # partial reply; leftovers are flushed by the next send()
+        finally:
+            self._transport.timeout = old
+        m = re.search(
+            r'previous\s*tint\D*?(\d+(?:\.\d*)?)', ' '.join(lines), re.IGNORECASE
+        )
+        return float(m.group(1)) if m else None
 
     def reset(self) -> None:
         """Send a hardware reset command and wait for the device to restart.
