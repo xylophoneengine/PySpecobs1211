@@ -18,29 +18,34 @@ VIBECODE ALERT. But it was tested with a Jeti specbos 1211-LAN :)
 - [pyserial](https://pypi.org/project/pyserial/) >= 3.5
 - [numpy](https://pypi.org/project/numpy/) >= 1.20
 
-No other dependencies. The entire driver is a single file: `specbos1211.py`.
+The entire driver is a single file: `specbos1211.py`.
 
-The optional GUI (`specbos1211_gui.py`) additionally needs matplotlib,
-colour-science and scipy; Tk comes with Python.
+The optional GUI (`specbos1211_gui.py`) additionally needs
+[matplotlib](https://pypi.org/project/matplotlib/),
+[colour-science](https://pypi.org/project/colour-science/) and
+[scipy](https://pypi.org/project/scipy/). Tk comes with Python; on Linux it
+may need the distro package (e.g. `python3-tk`).
 
 ---
 
 ## Installation
 
-Clone or copy `specbos1211.py` into your project, then install the two
-dependencies:
-
-```bash
-pip install pyserial numpy
-```
-
-Or with a virtual environment:
+From a clone of this repo, ideally in a virtual environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install pyserial numpy
+pip install .          # driver only (pyserial, numpy)
+pip install ".[gui]"   # driver + GUI (adds matplotlib, colour-science, scipy)
 ```
+
+Use `pip install -e ".[gui]"` instead if you want to edit the code.
+
+Without installing the package, `pip install -r requirements.txt` installs
+all dependencies (driver and GUI); then run from the repo directory.
+
+Or copy just `specbos1211.py` into your project and
+`pip install pyserial numpy`.
 
 ---
 
@@ -106,8 +111,8 @@ with Specbos1211.from_serial() as dev:
 spectral viewer for getting a measurement without writing code:
 
 ```bash
-pip install matplotlib colour-science scipy   # extra deps for the GUI
-python specbos1211_gui.py
+pip install ".[gui]"   # extra deps for the GUI
+python -m specbos1211_gui
 ```
 
 1. **Device:** leave *Auto (USB serial)*, pick a listed port (Rescan
@@ -391,7 +396,8 @@ The device responded to `*IDN?` but the response did not contain `JETI` or
 ## Development
 
 ```bash
-python -m unittest -v test_specbos1211_gui   # no hardware needed
+pip install -e ".[gui]"
+python -m unittest -v   # driver + GUI tests, no hardware needed
 ```
 
 ---

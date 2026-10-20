@@ -1,0 +1,8 @@
+# Driver
+pyserial>=3.5
+numpy>=1.20
+
+# GUI (specbos1211_gui.py); skip if you only use the driver
+matplotlib
+colour-science
+scipy
