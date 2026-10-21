@@ -48,7 +48,7 @@ def _it_label(ms: float) -> str:
 IT_AUTO: str = "Auto"
 IT_MS: dict[str, float] = {
     _it_label(ms): ms
-    for ms in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000)
+    for ms in (1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000)
 }
 IT_LABELS: list[str] = [IT_AUTO, *IT_MS]
 PLACEHOLDER: str = "-"
@@ -63,11 +63,9 @@ CSV_META: list[str] = [
 ]
 CONNECT_TIMEOUT_S: float = 2.0  # *IDN? / *VERS? answer at once
 BAUDS: tuple[int, ...] = (921600, 115200, 38400)  # factory default first
-# The BELL only arrives after the whole integration, and auto exposure may run
-# several trial integrations up to max_tint (60 s) first, so a per-read timeout
-# during a measurement must cover all of that (README, "Timeout during
-# measurement").
-AUTO_TIMEOUT_S: float = 300.0
+# Per-read timeout during a measurement (ACKs, data). The driver extends the
+# wait for the BELL itself, so this need not cover the integration time.
+MEASURE_TIMEOUT_S: float = 10.0
 POLL_MS: int = 100
 
 Yuv = tuple[float, float, float]
@@ -171,7 +169,7 @@ Device = Specbos1211 | DemoSpecbos
 def _measure(fut: Future[Spectrum], dev: Device, tint_ms: float) -> None:
     """Worker thread: configure and measure; the result or error goes to fut."""
     try:
-        dev.timeout = AUTO_TIMEOUT_S if tint_ms == 0 else tint_ms / 1e3 + 30.0
+        dev.timeout = MEASURE_TIMEOUT_S
         dev.configure(tint=tint_ms)  # 380-780 nm, 1 nm, no averaging
         spectrum: np.ndarray = dev.measure("sprad")
         wl: np.ndarray | None = dev.wavelengths

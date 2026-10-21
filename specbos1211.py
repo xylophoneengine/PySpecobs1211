@@ -470,6 +470,10 @@ class Specbos1211:
         self._wbeg: int | None = None
         self._wend: int | None = None
         self._step: int | None = None
+        # Exposure parameters, populated by configure(); size the BELL wait.
+        self._tint: float | None = None
+        self._max_tint: float | None = None
+        self._averages: int | None = None
 
     @classmethod
     def from_serial(
@@ -487,8 +491,10 @@ class Specbos1211:
                 device.
             baud: Baud rate. Defaults to 921600, which is the specbos 1211
                 factory default.
-            timeout: Per-read timeout in seconds. Must be long enough to
-                cover the longest expected integration time. Defaults to 60 s.
+            timeout: Per-read timeout in seconds. Defaults to 60 s. The wait
+                for the end of an integration in ``measure()`` is extended
+                automatically from the ``configure()`` settings, so this
+                only needs to cover the other reads.
 
         Returns:
             A ``Specbos1211`` instance with an open (but not yet verified)
@@ -524,7 +530,9 @@ class Specbos1211:
             host: IPv4 address or hostname of the specbos 1211 Ethernet port.
             port: TCP port the device listens on. Factory default is 2101,
                 configurable via the front-panel menu.
-            timeout: Socket-level timeout in seconds. Defaults to 60 s.
+            timeout: Socket-level timeout in seconds. Defaults to 60 s. The
+                wait for the end of an integration in ``measure()`` is
+                extended automatically from the ``configure()`` settings.
 
         Returns:
             A ``Specbos1211`` instance with an open TCP connection. Call
@@ -587,9 +595,10 @@ class Specbos1211:
         """Per-read timeout in seconds, applied to the live connection.
 
         Can be changed at any time without reconnecting, e.g. shortened for
-        quick queries or lengthened before a long integration. Like the
-        ``timeout`` argument of ``from_serial()`` / ``from_tcp()``, it bounds
-        each individual read, not a whole operation.
+        quick queries. Like the ``timeout`` argument of ``from_serial()`` /
+        ``from_tcp()``, it bounds each individual read, not a whole operation.
+        ``measure()`` raises it temporarily if the integration needs longer,
+        so the BELL wait never has to be sized by hand.
 
         Raises:
             JetiError: On assignment, if the value is not > 0.
@@ -714,6 +723,40 @@ class Specbos1211:
         self._wbeg = wbeg
         self._wend = wend
         self._step = step
+        self._tint = tint
+        self._max_tint = max_tint
+        self._averages = averages
+
+    def _bell_timeout(self) -> float | None:
+        """Expected seconds from measurement ACK to BELL, or ``None``.
+
+        The device takes a dark and a light exposure, so a fixed-``tint``
+        measurement needs about ``averages * 2 * tint`` plus ~3 s; 15 s of
+        margin is added. Auto exposure (``tint == 0``) is unverified on
+        hardware: 300 s floor, or ``averages * 4 * max_tint`` plus margin.
+
+        Returns:
+            Seconds, or ``None`` if ``configure()`` has not been called.
+        """
+        if self._tint is None or self._max_tint is None or self._averages is None:
+            return None
+        if self._tint == 0.0:
+            return max(300.0, self._averages * 4 * self._max_tint / 1e3 + 15.0)
+        return self._averages * 2 * self._tint / 1e3 + 15.0
+
+    def _wait_bell(self) -> None:
+        """Wait for BELL with the per-read timeout raised to cover the wait.
+
+        The transport timeout is per read, so it is lifted to the expected
+        integration time (never lowered) and restored afterwards.
+        """
+        old: float = self._transport.timeout
+        expected: float | None = self._bell_timeout()
+        self._transport.timeout = old if expected is None else max(old, expected)
+        try:
+            self._transport.read_until_bell()
+        finally:
+            self._transport.timeout = old
 
     @staticmethod
     def _parse_floats(lines: list[str]) -> np.ndarray:
@@ -747,7 +790,9 @@ class Specbos1211:
 
         The device performs integration (duration depends on ``configure()``
         settings), then streams the result. The call blocks until data is
-        fully received.
+        fully received. The wait for the end of the integration (BELL) is
+        extended automatically from the ``configure()`` settings, whatever
+        the ``timeout``; roughly ``2 * averages * tint`` plus a few seconds.
 
         Supported quantities:
 
@@ -797,7 +842,7 @@ class Specbos1211:
         if quantity == 'sprad':
             self._transport.send('*MEAS:SPRAD')
             self._transport.read_ack()
-            self._transport.read_until_bell()
+            self._wait_bell()
             result = self._parse_floats(self._transport.read_lines())
             # Firmware >=3.0 sends a unit-label block (\r\r) then the data block (\r\r).
             if result.size == 0:
@@ -817,7 +862,7 @@ class Specbos1211:
             try:
                 self._transport.send('*MEAS')
                 self._transport.read_ack()
-                self._transport.read_until_bell()
+                self._wait_bell()
                 # FORM 9: one \r-terminated float per point, no \r\r terminator.
                 result = np.array(
                     [float(self._transport.read_line()) for _ in range(wavelengths.size)]
@@ -831,7 +876,7 @@ class Specbos1211:
         elif quantity == 'radio':
             self._transport.send('*MEAS:RADIO')
             self._transport.read_ack()
-            self._transport.read_until_bell()
+            self._wait_bell()
             line = self._transport.read_line()
             value = float(line.split(':')[-1].strip())
             return np.float64(value)

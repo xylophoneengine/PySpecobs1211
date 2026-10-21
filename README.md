@@ -168,7 +168,7 @@ closed on exit, or call `connect()` / `disconnect()` manually.
 Specbos1211.from_serial(
     port: str | None = None,   # None = auto-detect by FTDI VID/PID
     baud: int = 921600,        # must be 38400, 115200, or 921600
-    timeout: float = 60.0,     # per-read timeout in seconds; cover max integration time
+    timeout: float = 60.0,     # per-read timeout in seconds (BELL wait is extended automatically)
 ) -> Specbos1211
 ```
 
@@ -362,12 +362,16 @@ the port explicitly.
 
 **Timeout during measurement**
 
-The default `timeout=60.0` s applies to every individual read call, not
-the whole measurement. In auto-expose mode the device may take several
-times `max_tint` milliseconds for trial integrations before the final
-measurement. Increase `timeout` for very dark targets or long integration
-times. It can also be changed on a live connection via `dev.timeout = ...`,
-without reconnecting.
+`timeout` (default 60 s) applies to every individual read call, not the
+whole measurement. The wait for the end of the integration (BELL) is extended
+automatically from the `configure()` settings, so long integration times need
+no manual timeout. The device takes a dark and a light exposure, so the wait
+is about `2 * averages * tint` plus ~3 s; the driver allows that plus 15 s
+(e.g. 60 s tint: about 123 s measured, 135 s allowed). In auto-expose mode the
+allowance is at least 300 s (or `4 * averages * max_tint` plus 15 s if larger).
+The longer timeout is applied only while waiting for the BELL and restored
+afterwards. `dev.timeout` can still be changed on a live connection, without
+reconnecting.
 
 **`JetiError: device NAK: 21 : error config argument`**
 
