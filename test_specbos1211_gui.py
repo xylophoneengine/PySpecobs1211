@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from specbos1211_gui import (
-    AUTO_TIMEOUT_S,
+    MEASURE_TIMEOUT_S,
     DemoSpecbos,
     Spectrum,
     _measure,
@@ -59,10 +59,8 @@ class GuiTest(unittest.TestCase):
         job: Future[Spectrum] = Future()
         _measure(job, dev, 0.0)
         wl, spectrum = job.result(timeout=0)
-        self.assertEqual(dev.timeout, AUTO_TIMEOUT_S)
+        self.assertEqual(dev.timeout, MEASURE_TIMEOUT_S)
         self.assertEqual(wl.shape, spectrum.shape)
-        _measure(Future(), dev, 2000.0)
-        self.assertEqual(dev.timeout, 32.0)
 
     def test_worker_hands_errors_to_future(self) -> None:
         class Short(DemoSpecbos):

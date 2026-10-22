@@ -117,5 +117,28 @@ class LastTintTest(unittest.TestCase):
         self.assertIsNone(self._reply(b""))  # times out, does not hang
 
 
+class BellTimeoutTest(unittest.TestCase):
+    def test_expected_wait_and_restore(self) -> None:
+        dev: Specbos1211 = _open(FakeSerial(401))
+        self.assertIsNone(dev._bell_timeout())  # not configured
+        dev.configure(tint=60000, averages=2)
+        self.assertEqual(dev._bell_timeout(), 2 * 2 * 60.0 + 15.0)
+        dev.configure(tint=0.0, max_tint=10000)
+        self.assertEqual(dev._bell_timeout(), 300.0)  # auto: floor
+        dev.configure(tint=0.0, max_tint=60000, averages=2)
+        self.assertEqual(dev._bell_timeout(), 2 * 4 * 60.0 + 15.0)
+
+    def test_bell_wait_raises_timeout_then_restores(self) -> None:
+        dev: Specbos1211 = _open(FakeSerial(401))
+        dev.configure(tint=30000)
+        seen: list[float] = []
+        with mock.patch.object(
+            dev._transport, "read_until_bell", lambda: seen.append(dev.timeout)
+        ):
+            dev._wait_bell()
+        self.assertEqual(seen, [75.0])
+        self.assertEqual(dev.timeout, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
